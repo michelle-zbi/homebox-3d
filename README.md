@@ -12,6 +12,29 @@ Ask Claude *"where's my passport?"* and the camera flies to the keepsake box on 
 - **Search** — <kbd>⌘K</kbd>, type, <kbd>Enter</kbd>. Click any item for the same treatment; hover for details and photos.
 - **Multiple floors** — rooms named *attic/upstairs/loft* go up a level, *basement/cellar* go down, laid out as an exploded staircase.
 
+## Two looks
+
+- **Diorama** (default): the stylised dollhouse in the GIF, items as colour-coded blocks.
+- **Realistic** (◧ button, or `?style=real`): wood/tile/marble floors, full-height walls that drop away on the camera's side, kitchens with counters, sink, range and fridge, beds, sofas, bathrooms — with your Homebox storage turned into real cabinets, wall cabinets and pulled-out drawers. Free-standing furniture uses CC0 models from Poly Haven (see [CREDITS](CREDITS.md)).
+  - **🚶 Walk**: first-person walkthrough with ceilings, doorways and windows — WASD + mouse, Shift to run, Esc to leave. When Claude (or search) points at something, you glide over to it.
+
+### Your actual house (optional, stays local)
+
+`house.json` (gitignored) lets the realistic view follow your real home:
+
+```bash
+npm run footprint -- "123 Main St, Springfield"   # building outline from OpenStreetMap
+```
+
+```json
+{
+  "footprint": [[-6.2, -11.9], [-6.1, 12.2], …],
+  "parking": [{ "model": "sedan", "color": "#a8141e" }, { "model": "coupe", "color": "#c4c7cb" }]
+}
+```
+
+`parking` puts your cars (`sedan` or `coupe`, any colour) in the garage — or the basement if there's no garage. Don't commit this file: it pins down where you live.
+
 ## How it fits together
 
 ```
@@ -103,6 +126,13 @@ The server is small enough to script against:
 
 homebox-3d listens on `127.0.0.1` by default and has no auth of its own — anyone who can reach it can see your whole inventory. If you expose it beyond localhost, put it behind something that authenticates (Tailscale, a reverse proxy with auth, etc.).
 
+## Development
+
+```bash
+npm run dev    # server + Vite hot reload
+npm test       # layout tests
+```
+
 ## License
 
-MIT
+MIT for the code. Bundled textures and models are CC0 — see [CREDITS](CREDITS.md).

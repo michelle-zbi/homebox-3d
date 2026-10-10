@@ -9,6 +9,10 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { layoutHouse, hash } from './layout.js';
 import { buildStatic } from './build.js';
+import { buildRealStatic, updateCutaway } from './real/build.js';
+import { Walker } from './real/walk.js';
+import { loadModels, modelSizes } from './real/models.js';
+import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { resolveQueries, pathOf } from '../../server/match.mjs';
 import './style.css';
 
@@ -27,7 +31,8 @@ renderer.shadowMap.type = THREE.PCFShadowMap;
 $('#app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = backgroundTexture();
+const bgGradient = backgroundTexture();
+scene.background = bgGradient;
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environmentIntensity = 0.35;
@@ -42,8 +47,104 @@ controls.maxPolarAngle = Math.PI * 0.47;
 controls.minDistance = 2;
 controls.maxDistance = 80;
 controls.autoRotateSpeed = 0.35;
+const walker = new Walker({ camera, controls, dom: renderer.domElement, onExit: () => { setCeilings(false); setOutdoor(false); updateWalkButton(); } });
+let ceilings = [];
+let lamps = [];
+// A fixed pool of room lights: a constant light count means no shader recompiles
+// as you walk around, and the cost doesn't grow with the number of rooms.
+const lampPool = Array.from({ length: 4 }, () => {
+  const l = new THREE.PointLight('#ffe9cf', 0, 6, 2);
+  scene.add(l);
+  return l;
+});
+function placeLamps() {
+  if (!walker.active || !lamps.length) {
+    lampPool.forEach((l) => (l.intensity = 0));
+    return;
+  }
+  const near = [...lamps].sort((a, b) => a.pos.distanceToSquared(camera.position) - b.pos.distanceToSquared(camera.position));
+  lampPool.forEach((l, i) => {
+    const a = near[i];
+    if (!a) return void (l.intensity = 0);
+    l.position.copy(a.pos);
+    l.intensity = a.intensity;
+    l.distance = a.range;
+  });
+}
+let doors = [];
+function setCeilings(on) { for (const c of ceilings) c.visible = on; }
+function updateWalkButton() {
+  const b = document.querySelector('#walk-toggle');
+  if (b) {
+    b.hidden = style !== 'real' || !layout?.floors.some((f) => f.rooms.length);
+    b.textContent = walker.active ? '⌂ Leave' : '🚶 Walk';
+  }
+}
+// Outdoor sky + meadow seen through the windows while walking (CC0, Poly Haven "meadow_2")
+let outdoor = null;
+function setOutdoor(on) {
+  if (on && !outdoor) {
+    outdoor = { pending: true };
+    new HDRLoader().load('/textures/outdoor.hdr', (t) => {
+      t.mapping = THREE.EquirectangularReflectionMapping;
+      outdoor = { bg: t, env: pmrem.fromEquirectangular(t).texture };
+      if (walker.active) setOutdoor(true);
+    });
+    return;
+  }
+  if (on && outdoor.bg) {
+    scene.background = outdoor.bg;
+    scene.backgroundIntensity = 0.9;
+    scene.environment = outdoor.env;
+    scene.environmentIntensity = 0.45;
+  } else if (!on) {
+    scene.background = bgGradient;
+    scene.backgroundIntensity = 1;
+    applyLighting();
+  }
+}
 
-scene.add(new THREE.HemisphereLight('#c9dcff', '#2a2320', 0.8));
+function startWalk(room) {
+  if (style !== 'real' || !layout) return;
+  const rooms = layout.floors.flatMap((f) => f.rooms);
+  room ||= rooms.find((r) => r.type === 'living') || rooms.find((r) => r.wy === 0) || rooms[0];
+  if (!room) return; // an empty Homebox has nowhere to walk yet
+  setOutdoor(true);
+  controls.autoRotate = false;
+  walker.enter(room);
+  setCeilings(true);
+  updateWalkButton();
+}
+
+const hemi = new THREE.HemisphereLight('#c9dcff', '#2a2320', 0.8);
+scene.add(hemi);
+
+// ---- style: 'diorama' (stylised blocks) or 'real' (materials + furniture)
+let style = 'diorama';
+try { style = new URLSearchParams(location.search).get('style') || localStorage.getItem('hb3d-style') || 'diorama'; } catch {}
+const roomEnv = scene.environment;
+let studioEnv = null;
+new HDRLoader().load('/textures/studio.hdr', (t) => {
+  t.mapping = THREE.EquirectangularReflectionMapping;
+  studioEnv = pmrem.fromEquirectangular(t).texture;
+  t.dispose();
+  if (style === 'real' && !walker.active) applyLighting();
+});
+function applyLighting() {
+  const real = style === 'real';
+  scene.environment = real && studioEnv ? studioEnv : roomEnv;
+  scene.environmentIntensity = real ? 0.95 : 0.35;
+  hemi.intensity = real ? 0.95 : 0.8;
+  sun.intensity = real ? 2.0 : 2.4;
+  sun.color.set(real ? '#fff4e6' : '#fff1dd');
+  renderer.toneMappingExposure = real ? 1.0 : 1.05;
+  // bright walls shouldn't bloom; only the beams/markers (pushed well above 1) should
+  bloom.threshold = real ? 2.2 : 1.0;
+  document.body.classList.toggle('real', real);
+  const b = document.querySelector('#style-toggle');
+  if (b) b.textContent = real ? '◧ Realistic' : '◧ Diorama';
+  updateWalkButton?.();
+}
 const sun = new THREE.DirectionalLight('#fff1dd', 2.4);
 sun.castShadow = true;
 sun.shadow.mapSize.set(4096, 4096);
@@ -177,6 +278,7 @@ function itemGeometry(node, dims) {
 function makeItemMesh(node, slot) {
   const [geo, height] = itemGeometry(node, slot.dims);
   const color = new THREE.Color(itemColor(node));
+  if (style === 'real') color.lerp(new THREE.Color('#b9b1a6'), 0.45);
   const m = new THREE.Mesh(
     geo,
     new THREE.MeshStandardMaterial({ color, roughness: 0.42, metalness: 0.05, emissive: color.clone(), emissiveIntensity: 0.06, transparent: true }),
@@ -187,7 +289,7 @@ function makeItemMesh(node, slot) {
   m.rotation.y = (hash(node.id) - 0.5) * 0.35;
   return m;
 }
-const sigOf = (node, slot) => `${node.name}|${itemColor(node)}|${slot.mini ? 1 : 0}|${slot.dims.w.toFixed(3)}`;
+const sigOf = (node, slot) => `${style}|${node.name}|${itemColor(node)}|${slot.mini ? 1 : 0}|${slot.dims.w.toFixed(3)}`;
 
 function slotPosition(slot, mesh) {
   const h = mesh.userData.height;
@@ -197,6 +299,45 @@ function slotPosition(slot, mesh) {
 // ---------------------------------------------------------------- applying snapshots
 
 let firstLoad = true;
+let walls = [];
+
+// Room names as small floating tags (realistic style; the diorama paints them on the floor)
+const roomTags = document.createElement('div');
+roomTags.id = 'room-tags';
+document.body.appendChild(roomTags);
+function renderRoomLabels() {
+  roomTags.innerHTML = '';
+  if (style !== 'real') return;
+  for (const f of layout.floors) for (const r of f.rooms) {
+    const el = document.createElement('span');
+    el.textContent = r.name;
+    el.onclick = () => (walker.active ? walker.enter(r) : flyToIds([r.id]));
+    el.dataset.x = r.wx;
+    el.dataset.y = r.wy + 2.7;
+    el.dataset.z = r.wz;
+    roomTags.appendChild(el);
+  }
+}
+function placeRoomLabels() {
+  const v = new THREE.Vector3();
+  for (const el of roomTags.children) {
+    v.set(+el.dataset.x, +el.dataset.y, +el.dataset.z).project(camera);
+    const vis = v.z < 1 && Math.abs(v.x) < 1.05 && Math.abs(v.y) < 1.05;
+    el.style.opacity = vis ? 1 : 0;
+    el.style.transform = `translate(${((v.x + 1) / 2) * innerWidth}px, ${((1 - v.y) / 2) * innerHeight}px) translate(-50%, -50%)`;
+  }
+}
+
+function setStyle(next) {
+  style = next;
+  try { localStorage.setItem('hb3d-style', style); } catch {}
+  applyLighting();
+  if (house) {
+    // rebuild everything; items re-make their meshes (sig includes style) and glide to new slots
+    applyHouse(house);
+    frameAll();
+  }
+}
 const prevParent = new Map();
 const prevNames = new Map();
 
@@ -205,10 +346,21 @@ function applyHouse(next) {
   const old = house;
   house = next;
   assignTagColors();
-  layout = layoutHouse(house);
+  layout = layoutHouse(house, style);
 
   if (staticGroup) scene.remove(staticGroup);
-  const built = buildStatic(layout);
+  const built = style === 'real' ? buildRealStatic(layout) : buildStatic(layout);
+  walls = built.walls || [];
+  ceilings = built.ceilings || [];
+  doors = built.doors || [];
+  lamps = built.lamps || [];
+  if (style === 'real') walker.setLayout(layout, doors);
+  if (walker.active) {
+    if (style === 'real') setCeilings(true);
+    else walker.exit();
+  }
+  updateWalkButton();
+  renderRoomLabels();
   staticGroup = built.root;
   pickables = built.pickables;
   furnitureGroups = built.furnitureGroups;
@@ -503,7 +655,7 @@ function itemIdsUnder(id) {
 }
 
 function addBeam(pos, baseColor, big = false) {
-  const color = new THREE.Color(baseColor).multiplyScalar(1.7);
+  const color = new THREE.Color(baseColor).multiplyScalar(style === 'real' ? 3.2 : 1.7);
   const h = 6;
   const r = big ? 0.22 : 0.05;
   const beam = new THREE.Mesh(
@@ -528,6 +680,25 @@ function addBeam(pos, baseColor, big = false) {
   beam.scale.y = 0.001;
   tween({ duration: 0.7, easing: ease.out, update: (k) => { beam.scale.y = k; beam.position.y = pos.y + (h * k) / 2; } });
   beams.add(beam, base);
+}
+
+// While walking: go stand in front of the (first) match and look at it.
+function walkToIds(ids) {
+  const id = ids[0];
+  const n = house.nodes[id];
+  let target, fu;
+  if (n.kind === 'item' && layout.items[id]) {
+    const it = layout.items[id];
+    target = new THREE.Vector3(it.x, it.y + 0.06, it.z);
+    fu = layout.furniture[it.parent] || layout.furniture[layout.crates[it.parent]?.parent];
+  } else if (layout.furniture[id] || layout.crates[id]) {
+    fu = layout.furniture[id] || layout.furniture[layout.crates[id].parent];
+    target = new THREE.Vector3(fu.wx, fu.wy + (fu.mount || 0) + Math.min(1.2, fu.h / 2), fu.wz);
+  } else {
+    const room = layout.floors.flatMap((f) => f.rooms).find((r) => r.id === id);
+    if (room) return walker.enter(room);
+  }
+  if (target) walker.goTo(target, fu);
 }
 
 function applyFocus(matches, caption = '', { fly = true, source = 'search' } = {}) {
@@ -561,7 +732,8 @@ function applyFocus(matches, caption = '', { fly = true, source = 'search' } = {
       }
     }
   }
-  if (fly) flyToIds(ids);
+  if (fly && walker.active) walkToIds(ids);
+  else if (fly) flyToIds(ids);
   renderCallout();
   controls.autoRotate = false;
 }
@@ -722,9 +894,14 @@ addEventListener('keydown', (e) => {
     input.focus();
     input.select();
   }
-  if (e.key === 'Escape' && document.activeElement !== input) clearFocus();
+  if (e.key === 'Escape' && document.activeElement !== input) {
+    if (walker.active && !document.pointerLockElement) walker.exit();
+    else clearFocus();
+  }
 });
 $('#home').addEventListener('click', () => { clearFocus(); frameAll(); });
+$('#style-toggle').addEventListener('click', () => setStyle(style === 'real' ? 'diorama' : 'real'));
+$('#walk-toggle').addEventListener('click', () => (walker.active ? walker.exit() : startWalk()));
 
 // hover + click
 const ray = new THREE.Raycaster();
@@ -733,21 +910,28 @@ let hovered = null;
 let downAt = null;
 const tip = $('#tip');
 renderer.domElement.addEventListener('pointermove', (e) => {
+  // with the pointer locked (walking) clientX/Y are frozen; the tip sits at the crosshair instead
+  if (document.pointerLockElement === renderer.domElement) return void (lastInteraction = performance.now());
   mouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   tip.style.transform = `translate(${Math.min(e.clientX + 16, innerWidth - 280)}px, ${Math.min(e.clientY + 16, innerHeight - 160)}px)`;
   lastInteraction = performance.now();
 });
 renderer.domElement.addEventListener('pointerdown', (e) => (downAt = [e.clientX, e.clientY]));
 renderer.domElement.addEventListener('pointerup', (e) => {
-  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
+  if (walker.active && document.pointerLockElement !== renderer.domElement) {
+    if (downAt && Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) <= 5) renderer.domElement.requestPointerLock?.();
+    return;
+  }
+  if (!walker.active && (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5)) return;
   if (hovered) pick(hovered);
   else if (focus) clearFocus();
 });
 
 function updateHover() {
-  ray.setFromCamera(mouse, camera);
+  ray.setFromCamera(walker.active && document.pointerLockElement ? new THREE.Vector2(0, 0) : mouse, camera);
   const targets = [...itemMeshes.values()].filter((m) => m.visible && m.material.opacity > 0.5);
-  const hit = ray.intersectObjects(targets, false)[0] || ray.intersectObjects(pickables, true)[0];
+  const pickFrom = walker.active ? pickables.filter((p) => p.userData.kind !== 'room') : pickables;
+  const hit = ray.intersectObjects(targets, false)[0] || ray.intersectObjects(pickFrom, true)[0];
   let id = null;
   if (hit) {
     let o = hit.object;
@@ -766,6 +950,7 @@ function updateHover() {
   if (itemMeshes.get(hovered)) itemMeshes.get(hovered).material.emissiveIntensity = 0.4;
   const count = n.kind === 'location' ? itemIdsUnder(n.id).length : 0;
   tip.hidden = false;
+  if (walker.active && document.pointerLockElement) tip.style.transform = `translate(${innerWidth / 2 + 18}px, ${innerHeight / 2 + 18}px)`;
   tip.innerHTML = `
     ${n.imageId ? `<img src="/api/image/${n.id}/${n.imageId}" alt="">` : ''}
     <div class="t-name">${esc(n.name)}</div>
@@ -794,8 +979,16 @@ const callout = $('#callout');
 function loop(now) {
   const t = now / 1000;
   runTweens(now);
-  if (!focus && now - lastInteraction > 25000 && !tweens.size) controls.autoRotate = true;
-  controls.update();
+  if (!focus && !walker.active && now - lastInteraction > 25000 && !tweens.size) controls.autoRotate = true;
+  if (!walker.active) controls.update();
+  const dt = Math.min(0.05, (now - (loop.last || now)) / 1000);
+  loop.last = now;
+  if (walker.active) walker.update(dt);
+  placeLamps();
+  if (style === 'real') {
+    updateCutaway(walls, camera, dt, walker.active);
+    placeRoomLabels();
+  }
   for (const b of beams.children) {
     if (!b.userData.pulse) continue;
     b.userData.base ??= b.scale.x;
@@ -815,9 +1008,12 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
+applyLighting();
+// real furniture models: rebuild the realistic scene once they're in
+loadModels().then(() => { if (style === 'real' && house) applyHouse(house); });
 await document.fonts.load('800 64px Inter').catch(() => {});
 connect();
 requestAnimationFrame(loop);
 
 // handy for screenshots / debugging from the console
-Object.assign(window, { hb: { applyFocus, clearFocus, frameAll, get house() { return house; }, resolve: (q) => resolveQueries(house, q) } });
+Object.assign(window, { hb: { modelSizes, setStyle, startWalk, walker, layoutRooms: () => layout.floors.flatMap((f) => f.rooms), applyFocus, clearFocus, frameAll, get house() { return house; }, resolve: (q) => resolveQueries(house, q) } });

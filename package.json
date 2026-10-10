@@ -10,7 +10,8 @@
     "start": "node server/index.mjs",
     "seed": "node scripts/seed-demo.mjs",
     "mcp": "node mcp/server.mjs",
-    "footprint": "node scripts/footprint.mjs"
+    "footprint": "node scripts/footprint.mjs",
+    "test": "node --test test/"
   },
   "engines": {
     "node": ">=20"

@@ -90,3 +90,13 @@ kbd { font: 600 11px Inter, sans-serif; color: var(--dim); border: 1px solid var
 
 .callout.pinned { left: auto; right: 16px; top: 66px; margin: 0; transform: none !important; }
 .callout.pinned::after { display: none; }
+
+#room-tags span { position: fixed; left: 0; top: 0; pointer-events: auto; cursor: pointer; padding: 4px 10px; border-radius: 999px; background: rgba(16,20,29,.72); border: 1px solid var(--line); font-size: 12px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; backdrop-filter: blur(8px); transition: opacity .2s; }
+
+#controls [hidden] { display: none; }
+body.walking #room-tags, body.walking #stats, body.walking #legend { display: none; }
+#walk-hud .crosshair { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: rgba(255,255,255,.85); box-shadow: 0 0 0 1.5px rgba(0,0,0,.35); pointer-events: none; }
+#walk-hud .where { position: fixed; left: 50%; top: 72px; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px; background: rgba(16,20,29,.7); border: 1px solid var(--line); font-weight: 700; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; backdrop-filter: blur(10px); pointer-events: none; }
+#walk-hud .where:empty { display: none; }
+#walk-hud .hint { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 8px 14px; border-radius: 12px; background: rgba(16,20,29,.7); border: 1px solid var(--line); color: var(--dim); font-size: 12px; backdrop-filter: blur(10px); pointer-events: none; white-space: nowrap; }
+#minimap { position: fixed; left: 16px; bottom: 16px; border-radius: 14px; background: rgba(16,20,29,.72); border: 1px solid var(--line); backdrop-filter: blur(10px); }

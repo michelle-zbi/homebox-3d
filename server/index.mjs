@@ -30,13 +30,15 @@ const homebox = createHomebox({
   password: process.env.HOMEBOX_PASSWORD,
 });
 
-// Optional real building outline (see scripts/footprint.mjs); re-read on change.
+// Optional local house details (gitignored): the building outline from
+// scripts/footprint.mjs and the cars parked in the basement/garage. Re-read every poll.
 const houseFile = path.resolve(root, process.env.HOUSE_FILE || 'house.json');
-function readFootprint() {
+function readHouseFile() {
   try {
-    return JSON.parse(fs.readFileSync(houseFile, 'utf8')).footprint || null;
+    const h = JSON.parse(fs.readFileSync(houseFile, 'utf8'));
+    return { footprint: h.footprint || null, parking: h.parking || null };
   } catch {
-    return null;
+    return { footprint: null, parking: null };
   }
 }
 
@@ -53,7 +55,7 @@ function broadcast(event, data) {
 async function poll() {
   try {
     const next = await homebox.snapshot();
-    next.footprint = readFootprint();
+    Object.assign(next, readHouseFile());
     const json = JSON.stringify(next);
     if (json !== houseJson) {
       const first = !house;
@@ -95,7 +97,7 @@ const server = http.createServer(async (req, res) => {
       const queries = [].concat(body.queries || body.query || []);
       // Pick up changes Claude just made through the Homebox MCP before resolving.
       house = await homebox.snapshot();
-      house.footprint = readFootprint();
+      Object.assign(house, readHouseFile());
       houseJson = JSON.stringify(house);
       broadcast('house', house);
       const result = resolveQueries(house, queries);

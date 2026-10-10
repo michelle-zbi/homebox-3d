@@ -61,5 +61,9 @@ pts = pts.map(([x, z]) => [x * Math.cos(rot) - z * Math.sin(rot), x * Math.sin(r
 
 const area = Math.abs(pts.reduce((s, p, i) => s + p[0] * pts[(i + 1) % pts.length][1] - pts[(i + 1) % pts.length][0] * p[1], 0)) / 2;
 const round = (v) => Math.round(v * 100) / 100;
-fs.writeFileSync(out, JSON.stringify({ footprint: pts.map(([x, z]) => [round(x), round(z)]), rotation: round((rot * 180) / Math.PI), source: `OpenStreetMap ${osm} (ODbL)` }, null, 2) + '\n');
+// update the outline but keep anything else already in house.json (e.g. "parking")
+let existing = {};
+try { existing = JSON.parse(fs.readFileSync(out, 'utf8')); } catch {}
+const next = { ...existing, footprint: pts.map(([x, z]) => [round(x), round(z)]), rotation: round((rot * 180) / Math.PI), source: `OpenStreetMap ${osm} (ODbL)` };
+fs.writeFileSync(out, JSON.stringify(next, null, 2) + '\n');
 console.log(`Saved ${pts.length}-corner outline, ${Math.round(area)} m² (${Math.round(area * 10.764)} sq ft) -> ${path.basename(out)}`);
