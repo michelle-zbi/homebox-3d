@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Homebox 3D</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 3 3 12v17h26V12z' fill='%23ffb86b'/><rect x='12' y='18' width='8' height='11' fill='%230b0e14'/></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <header class="panel" id="brand">
+      <div class="logo">
+        <svg viewBox="0 0 32 32" width="22" height="22"><path d="M16 3 3 12v17h26V12z" fill="#ffb86b" /><rect x="12" y="18" width="8" height="11" fill="#0b0e14" /></svg>
+        <span>homebox<em>3d</em></span>
+      </div>
+      <div id="live" title="Live — synced with Homebox"><i></i>live</div>
+    </header>
+
+    <div id="search" class="panel">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+      <input placeholder="Find anything in the house…" autocomplete="off" spellcheck="false" />
+      <kbd>⌘K</kbd>
+      <ul id="results"></ul>
+    </div>
+
+    <section id="stats" class="panel"></section>
+    <nav id="legend"></nav>
+
+    <ul id="feed"></ul>
+
+    <div id="controls">
+      <label class="panel"><input type="checkbox" id="follow" checked /> Follow changes</label>
+      <button class="panel" id="home" title="Overview">⌂ Overview</button>
+    </div>
+
+    <div id="callout" class="callout" hidden></div>
+    <div id="tip" hidden></div>
+
+    <script type="module" src="/web/src/main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "name": "homebox-3d",
+  "version": "0.1.0",
+  "description": "Your Homebox inventory as a live 3D dollhouse \u2014 with an MCP server so Claude can point at things.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "node --watch-path=server server/index.mjs --dev",
+    "build": "vite build",
+    "start": "node server/index.mjs",
+    "seed": "node scripts/seed-demo.mjs",
+    "mcp": "node mcp/server.mjs",
+    "footprint": "node scripts/footprint.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "three": "^0.186.1",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "vite": "^6.4.4"
+  }
+}

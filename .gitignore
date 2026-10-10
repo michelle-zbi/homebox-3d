@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.demo/
+*.log
+docs/demo.mp4
+house.json
