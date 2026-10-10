@@ -12,7 +12,7 @@ const MINI = 0.13; // items inside a crate
 const MINI_PITCH = 0.17;
 
 export const FLOOR_RISE = 2.6; // vertical offset between floors
-const FLOOR_STEP = 3.5; // extra depth gap between floors (exploded "staircase" view)
+const FLOOR_STEP = 2.2; // extra depth gap between floors (exploded "staircase" view)
 const ROOM_GAP = 0.35;
 
 const FLOOR_RULES = [

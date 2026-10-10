@@ -6,6 +6,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { layoutHouse, hash } from './layout.js';
 import { buildStatic } from './build.js';
 import { resolveQueries, pathOf } from '../../server/match.mjs';
@@ -57,6 +58,8 @@ const ao = new GTAOPass(scene, camera, innerWidth, innerHeight);
 ao.updateGtaoMaterial({ radius: 0.35, distanceFallOff: 1, thickness: 1, scale: 1.1 });
 ao.blendIntensity = 0.85;
 composer.addPass(ao);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.45, 0.3, 1.0);
+composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
 function backgroundTexture() {
@@ -81,6 +84,7 @@ const tweens = new Set();
 const ease = {
   inOut: (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2),
   out: (t) => 1 - (1 - t) ** 3,
+  smoother: (t) => t * t * t * (t * (t * 6 - 15) + 10),
   bounce(t) {
     const n = 7.5625, d = 2.75;
     if (t < 1 / d) return n * t * t;
@@ -317,7 +321,8 @@ function arcTo(mesh, target) {
 }
 
 // expanding ring on the floor, used as a "landed here" ping
-function ring(pos, color) {
+function ring(pos, baseColor) {
+  const color = new THREE.Color(baseColor).multiplyScalar(2);
   const m = new THREE.Mesh(
     new THREE.RingGeometry(0.12, 0.16, 48),
     new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false, toneMapped: false }),
@@ -349,23 +354,32 @@ function fitShadows() {
 
 // ---------------------------------------------------------------- camera moves
 
-function flyTo(box, { soft = false, duration = 1.4 } = {}) {
+function flyTo(box, { soft = false, duration } = {}) {
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   const big = size.x > 8;
-  const dist = Math.max(soft ? 7 : 5.5, fitDistance(size) * (big ? 1.2 : 1) + 3);
   // furniture opens toward +z, so look in from the front, a little to the side
   const side = (Math.sign(camera.position.x - controls.target.x) || 1) * (big ? 0.4 : 1);
-  const elev = THREE.MathUtils.degToRad(30);
-  const nd = new THREE.Vector3(0.38 * side, 0, 1).normalize().multiplyScalar(Math.cos(elev)).setY(Math.sin(elev));
-  const toPos = center.clone().add(nd.multiplyScalar(dist));
+  const elev = THREE.MathUtils.degToRad(big ? 38 : 30);
+  const dir = new THREE.Vector3(0.38 * side, 0, 1).normalize().multiplyScalar(Math.cos(elev)).setY(Math.sin(elev));
+  const dist = Math.max(soft ? 7 : 5.5, fitDistance(box, dir, big ? 1 : 0.6));
+  moveCamera(center.clone().add(dir.multiplyScalar(dist)), center, duration);
+}
+
+// One camera move for everything: smootherstep easing, and long trips rise a little
+// mid-flight so the camera doesn't skim through the walls.
+function moveCamera(toPos, toTarget, duration) {
   const fromPos = camera.position.clone();
   const fromTarget = controls.target.clone();
+  const travel = fromPos.distanceTo(toPos) + fromTarget.distanceTo(toTarget);
+  const lift = travel > 6 ? Math.min(6, travel * 0.12) : 0;
   tween({
-    duration,
+    duration: duration ?? Math.min(2.4, 1.3 + travel * 0.025),
+    easing: ease.smoother,
     update: (k) => {
       camera.position.lerpVectors(fromPos, toPos, k);
-      controls.target.lerpVectors(fromTarget, center, k);
+      camera.position.y += Math.sin(Math.PI * k) * lift;
+      controls.target.lerpVectors(fromTarget, toTarget, k);
     },
   });
 }
@@ -391,27 +405,50 @@ function flyToIds(ids, opts = {}) {
   if (!box.isEmpty()) flyTo(box, opts);
 }
 
-// distance at which a box of this size fills the view, both horizontally and vertically
-function fitDistance(size) {
-  const vfov = THREE.MathUtils.degToRad(camera.fov);
-  const hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
-  return Math.max(size.x / 2 / Math.tan(hfov / 2), (Math.max(size.z, size.y) * 0.9) / Math.tan(vfov / 2)) * 1.08;
+// Smallest distance along `dir` at which every corner of `box` lands inside the
+// visible area (leaving room for the HUD panels). `pad` adds world-space slack.
+function fitDistance(box, dir, pad = 0, points = null) {
+  const b = box.clone().expandByScalar(pad);
+  const center = b.getCenter(new THREE.Vector3());
+  const corners = points || [];
+  if (!points) for (const x of [b.min.x, b.max.x]) for (const y of [b.min.y, b.max.y]) for (const z of [b.min.z, b.max.z]) corners.push(new THREE.Vector3(x, y, z));
+  const cam = camera.clone();
+  const fits = (d) => {
+    cam.position.copy(center).addScaledVector(dir, d);
+    cam.lookAt(center);
+    cam.updateMatrixWorld();
+    return corners.every((c) => {
+      const p = c.clone().project(cam);
+      return p.z < 1 && Math.abs(p.x) < 0.94 && p.y < 0.7 && p.y > -0.8;
+    });
+  };
+  let lo = 0.5, hi = 400;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (fits(mid)) hi = mid;
+    else lo = mid;
+  }
+  return hi;
 }
 
 function frameAll(animate = true) {
   const box = new THREE.Box3().setFromObject(staticGroup);
   const center = box.getCenter(new THREE.Vector3());
-  const size = box.getSize(new THREE.Vector3());
-  const dist = fitDistance(size) + 2;
-  const pos = center.clone().add(new THREE.Vector3(0.25, 0.8, 1).normalize().multiplyScalar(dist));
+  const dir = new THREE.Vector3(0.2, 1.15, 1).normalize();
+  // fit the floors themselves (slab corners + furniture height), not the empty air
+  // of one big bounding box spanning basement to upstairs
+  const pts = [];
+  for (const f of layout.floors) {
+    const pad = 0.6;
+    for (const x of [f.x - f.w / 2 - pad, f.x + f.w / 2 + pad]) for (const z of [f.z - f.d / 2 - pad, f.z + f.d / 2 + pad]) for (const y of [f.y - 0.25, f.y + 1.6]) pts.push(new THREE.Vector3(x, y, z));
+  }
+  const pos = center.clone().addScaledVector(dir, fitDistance(box, dir, 0, pts));
   if (!animate) {
     camera.position.copy(pos);
     controls.target.copy(center);
     return;
   }
-  const fp = camera.position.clone();
-  const ft = controls.target.clone();
-  tween({ duration: 1.4, update: (k) => { camera.position.lerpVectors(fp, pos, k); controls.target.lerpVectors(ft, center, k); } });
+  moveCamera(pos, center);
 }
 
 function findCrateGroup(id) {
@@ -465,7 +502,8 @@ function itemIdsUnder(id) {
   return out;
 }
 
-function addBeam(pos, color, big = false) {
+function addBeam(pos, baseColor, big = false) {
+  const color = new THREE.Color(baseColor).multiplyScalar(1.7);
   const h = 6;
   const r = big ? 0.22 : 0.05;
   const beam = new THREE.Mesh(
@@ -749,6 +787,7 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   composer.setSize(innerWidth, innerHeight);
+  bloom.setSize(innerWidth, innerHeight);
 });
 
 const callout = $('#callout');

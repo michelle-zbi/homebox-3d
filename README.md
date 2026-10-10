@@ -27,7 +27,7 @@ Claude reads and edits your inventory through a Homebox MCP server (for example 
 You need Node 20+ and a Homebox **0.26+** instance (the [sysadminsmedia](https://github.com/sysadminsmedia/homebox) build; Docker or the single binary from its releases both work).
 
 ```bash
-git clone https://github.com/<you>/homebox-3d && cd homebox-3d
+git clone https://github.com/michelle-zbi/homebox-3d && cd homebox-3d
 npm install
 cp .env.example .env          # set HOMEBOX_URL and HOMEBOX_TOKEN (Homebox → Profile → API Keys)
 npm run build && npm start    # → http://127.0.0.1:7750
